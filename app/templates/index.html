@@ -4,65 +4,150 @@
 {% block content %}
 <div class="text-center py-16">
   <h1 class="text-3xl font-bold text-slate-800 mb-3">강의 퀴즈 생성기</h1>
-  <p class="text-slate-400 mb-12">시스템 오디오를 캡처해 자동으로 퀴즈를 생성합니다.</p>
+  <p class="text-slate-400 mb-12">브라우저에서 오디오를 캡처해 자동으로 퀴즈를 생성합니다.</p>
 
-  {% if active_job_id %}
+  <!-- 대기 상태 -->
+  <div id="idle-view">
+    <button id="start-btn" onclick="startCapture()"
+            class="px-10 py-4 bg-indigo-600 text-white text-lg font-semibold rounded-2xl shadow-md hover:bg-indigo-700 active:scale-95 transition-all">
+      캡처 시작
+    </button>
+    <p class="mt-4 text-sm text-slate-400">
+      Chrome / Edge 전용 &mdash; 팝업에서 <strong>화면 또는 탭</strong>을 선택하고
+      <strong>"시스템 오디오 공유"</strong>를 체크하세요.
+    </p>
+  </div>
+
   <!-- 캡처 진행 중 -->
-  <div class="inline-block bg-white border border-amber-200 rounded-2xl p-8 shadow-sm text-left">
+  <div id="active-view" class="hidden inline-block bg-white border border-amber-200 rounded-2xl p-8 shadow-sm text-left">
     <div class="flex items-center gap-3 mb-6">
       <span class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
-      <span class="font-semibold text-slate-700">캡처 진행 중 &mdash; Job #{{ active_job_id }}</span>
+      <span class="font-semibold text-slate-700">캡처 진행 중 &mdash; Job <span id="job-id-label">#?</span></span>
     </div>
     <div class="flex gap-3">
-      <button onclick="stopCapture(this)"
+      <button onclick="stopCapture()"
               class="px-5 py-2.5 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 active:scale-95 transition-all">
         캡처 중지
       </button>
-      <a href="/jobs/{{ active_job_id }}"
+      <a id="result-link" href="#"
          class="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-50 transition-colors">
         결과 보기
       </a>
     </div>
   </div>
-
-  {% else %}
-  <!-- 캡처 시작 -->
-  <button onclick="startCapture(this)"
-          class="px-10 py-4 bg-indigo-600 text-white text-lg font-semibold rounded-2xl shadow-md hover:bg-indigo-700 active:scale-95 transition-all">
-    캡처 시작
-  </button>
-  <p class="mt-4 text-sm text-slate-400">버튼을 누르면 시스템 오디오 캡처가 시작됩니다.</p>
-  {% endif %}
 </div>
 
 <script>
-async function startCapture(btn) {
+const SAMPLE_RATE = 16000;
+let ws = null, audioCtx = null, stream = null, processor = null, currentJobId = null;
+
+async function startCapture() {
+  const btn = document.getElementById('start-btn');
   btn.disabled = true;
-  btn.textContent = '시작 중...';
+  btn.textContent = '연결 중...';
+
   try {
-    const res = await fetch('/api/v1/capture/start', { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) { alert(data.detail || '캡처 시작 실패'); btn.disabled = false; btn.textContent = '캡처 시작'; return; }
-    window.location.href = `/jobs/${data.job_id}`;
-  } catch (e) {
-    alert('서버 오류: ' + e.message);
+    // video: true 로 요청 후 즉시 무시 — audio-only 지원이 브라우저마다 다름
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: {
+        channelCount: 1,
+        sampleRate: SAMPLE_RATE,
+        echoCancellation: false,
+        noiseSuppression: false,
+      }
+    });
+
+    if (!stream.getAudioTracks().length) {
+      throw new Error('"시스템 오디오 공유" 체크박스를 선택해주세요.');
+    }
+
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/audio`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      const source = audioCtx.createMediaStreamSource(stream);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      processor.onaudioprocess = (e) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const float32 = e.inputBuffer.getChannelData(0);
+        const int16 = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i++) {
+          int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+        }
+        ws.send(int16.buffer);
+      };
+
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+    };
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'job_created') {
+        currentJobId = msg.job_id;
+        document.getElementById('job-id-label').textContent = '#' + currentJobId;
+        document.getElementById('result-link').href = '/jobs/' + currentJobId;
+        document.getElementById('idle-view').classList.add('hidden');
+        document.getElementById('active-view').classList.remove('hidden');
+      } else if (msg.type === 'error') {
+        alert(msg.message);
+        cleanup();
+        btn.disabled = false;
+        btn.textContent = '캡처 시작';
+      }
+    };
+
+    ws.onclose = (e) => {
+      if (currentJobId) {
+        window.location.href = '/jobs/' + currentJobId;
+      } else {
+        // job_created 받기 전에 연결이 끊어진 경우 (서버 에러 등)
+        cleanup();
+        btn.disabled = false;
+        btn.textContent = '캡처 시작';
+        if (e.code !== 1000) {
+          alert(`서버 연결이 끊겼습니다 (code: ${e.code}). DB나 서버 상태를 확인해주세요.`);
+        }
+      }
+    };
+
+    ws.onerror = () => {
+      cleanup();
+      btn.disabled = false;
+      btn.textContent = '캡처 시작';
+      alert('WebSocket 연결 오류. 서버가 실행 중인지 확인해주세요.');
+    };
+
+    // 사용자가 브라우저 팝업에서 공유 중지 시
+    stream.getAudioTracks()[0].addEventListener('ended', stopCapture);
+
+  } catch (err) {
+    alert('캡처 오류: ' + err.message);
+    cleanup();
     btn.disabled = false;
     btn.textContent = '캡처 시작';
   }
 }
 
-async function stopCapture(btn) {
-  btn.disabled = true;
-  btn.textContent = '중지 중...';
-  try {
-    const res = await fetch('/api/v1/capture/stop', { method: 'POST' });
-    if (!res.ok) { const d = await res.json(); alert(d.detail || '중지 실패'); btn.disabled = false; btn.textContent = '캡처 중지'; return; }
-    window.location.reload();
-  } catch (e) {
-    alert('서버 오류: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = '캡처 중지';
-  }
+function stopCapture() {
+  const jobId = currentJobId;
+  // ws.onclose를 먼저 제거해서 정상 종료 시 에러 알림이 뜨지 않도록 함
+  if (ws) { ws.onclose = null; ws.onerror = null; }
+  cleanup();
+  if (jobId) window.location.href = '/jobs/' + jobId;
+}
+
+function cleanup() {
+  if (processor) { processor.disconnect(); processor = null; }
+  if (audioCtx)  { audioCtx.close(); audioCtx = null; }
+  if (stream)    { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (ws && ws.readyState === WebSocket.OPEN) { ws.close(); }
+  ws = null;
+  currentJobId = null;
 }
 </script>
 {% endblock %}

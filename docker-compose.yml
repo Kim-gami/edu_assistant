@@ -1,34 +1,54 @@
 services:
 
-  # ── PostgreSQL 15 ───────────────────────────────────────────────────────────
-  # Phase 1: FastAPI 앱은 Windows 호스트에서 직접 실행 (WASAPI 캡처 제약)
-  # Phase 2: FastAPI 앱 컨테이너 추가 예정
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
   db:
-    image: postgres:15-alpine        # Alpine = 경량 리눅스 베이스
+    image: postgres:15-alpine
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5432:5432"        # 로컬에서 DB GUI(DBeaver, TablePlus 등)로 직접 접속 가능
+      - "5432:5432"
     volumes:
-      # named volume: 컨테이너 삭제해도 DB 데이터 유지됨
-      # docker-compose down -v 하면 데이터까지 삭제되니 주의
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      # pg_isready: PostgreSQL이 실제로 연결을 받을 수 있는 상태인지 확인
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 5s         # 5초마다 체크
-      timeout: 5s          # 5초 안에 응답 없으면 실패
-      retries: 5           # 5번 실패하면 unhealthy로 판정
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
-  # ── Redis (Phase 2 — Celery 전환 시 주석 해제) ──────────────────────────────
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   restart: unless-stopped
+  # ── Ollama (Qwen2.5-7B-Instruct) ─────────────────────────────────────────────
+  # 이미 받은 모델을 볼륨 마운트로 재사용 (재다운로드 없음)
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - C:/Users/user/.ollama:/root/.ollama
+    restart: unless-stopped
+
+  # ── FastAPI 앱 ────────────────────────────────────────────────────────────────
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DB_HOST: db
+      LLM_BASE_URL: http://ollama:11434/v1
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      # 이미 받은 faster-whisper 모델 캐시 재사용
+      - C:/Users/user/.cache/huggingface:/root/.cache/huggingface
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: unless-stopped
 
 volumes:
-  postgres_data:    # DB 데이터 영구 보관
+  postgres_data:
+  uploads:

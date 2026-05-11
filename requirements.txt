@@ -8,15 +8,17 @@ jinja2==3.1.4
 sqlalchemy==2.0.35
 asyncpg==0.31.0              # PostgreSQL 비동기 드라이버
 alembic==1.13.3
+greenlet==3.1.1              # SQLAlchemy async 실행 필요
 
 # ── Config ───────────────────────────────────────────────────────────────────
 pydantic-settings==2.5.2
 
-# ── 오디오 캡처 (Windows 전용) ───────────────────────────────────────────────
-pyaudiowpatch==0.2.12.8      # Windows WASAPI loopback 캡처 (pyaudio 포크)
+# ── 오디오 캡처 (브라우저 → WebSocket) ─────────────────────────────────────
+# 캡처는 브라우저(getDisplayMedia)에서 수행, 서버는 WebSocket으로 수신만 함
+# pyaudiowpatch 불필요 (Windows WASAPI 방식 제거)
 
 # ── STT (Phase 1 — 벤치마크 후 하나로 확정 예정) ────────────────────────────
-faster-whisper==1.1.4        # STT 확정 (2026-05-11)
+faster-whisper==1.1.1        # STT 확정 (2026-05-11, 1.1.4 미존재→1.1.1)
 openai==1.56.0               # LLM 클라이언트 — Ollama OpenAI-compatible 엔드포인트 사용
 # whisperx==3.1.5            # 미사용 — faster-whisper로 확정
 

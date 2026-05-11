@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Job, JobStatus, Quiz
 from app.models.db import get_session as get_db_session
-from app.services.audio.session import get_session as get_capture_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
@@ -18,11 +17,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
-    capture = get_capture_session()
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "active_job_id": capture.job_id if capture else None,
-    })
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
