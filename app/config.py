@@ -30,5 +30,18 @@ class Settings(BaseSettings):
     upload_dir: str = "/app/uploads"
     max_file_size_mb: int = 200
 
+    # STT (faster-whisper)
+    stt_model_size: str = "large-v3"
+    stt_device: str = "cuda"        # cuda | cpu
+    stt_compute_type: str = "float16"  # float16(GPU) | int8(CPU)
+
+    # LLM (Qwen2.5-7B-Instruct via Ollama)
+    llm_base_url: str = "http://localhost:11434/v1"
+    llm_model: str = "qwen2.5:7b-instruct"
+    llm_api_key: str = "ollama"     # Ollama는 키 불필요, openai SDK 형식 맞추기용
+    llm_temperature: float = 0.3
+    llm_max_tokens: int = 2048
+    llm_quiz_count: int = 5
+
 
 settings = Settings()

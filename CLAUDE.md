@@ -26,12 +26,12 @@ Windows WASAPI loopback을 통해 컴퓨터에서 재생되는 소리(강의 영
   - **Windows 전용**: 다른 OS 지원 계획 없음
 
 ### 미확정 — 실험 후 결정
-- **STT 모델**: `faster-whisper` vs `whisperx` 비교 후 확정
-  - 평가 기준: 전사 정확도(WER), 처리 속도(RTF), VRAM 사용량, 한국어 지원
-  - 결정 전까지 인터페이스만 구현, 구현체는 교체 가능하게 추상화
-- **LLM**: Llama 3.1 / GPT-4o-mini / Mistral 등 비교 후 확정
-  - 평가 기준: 퀴즈 품질(개념 적절성, 오답 혼동도), 응답 속도, 비용
-  - 필요시 파인튜닝 또는 프롬프트 엔지니어링으로 성능 개선
+- **STT 모델**: `faster-whisper` 확정 (2026-05-11, ADR-001 참고)
+  - 모델: large-v3, VAD 내장, 한국어 고정
+  - GPU: float16 / CPU: int8 (config.py `STT_DEVICE`, `STT_COMPUTE_TYPE`으로 제어)
+- **LLM**: `Qwen2.5-7B-Instruct` 확정 (2026-05-11, ADR-002 참고)
+  - Ollama 로컬 서빙, OpenAI-compatible API (`http://localhost:11434/v1`)
+  - `openai` SDK 사용 → base_url만 바꾸면 클라우드 LLM으로 전환 가능
 - **임베딩 모델**: 노이즈 제거용, 한국어 지원 모델 우선 검토
 
 ---
@@ -212,16 +212,40 @@ class STTBase(ABC):
 
 > 이 섹션은 세션마다 업데이트한다.
 
-- **현재 Phase**: Phase 1 MVP 뼈대 완료 (2026-05-11)
-- **마지막 완료 작업**: 디렉토리 구조, Docker Compose(DB only), FastAPI 뼈대, SQLAlchemy+Alembic, STT 추상 인터페이스, WASAPI 캡처 모듈(capture.py/buffer.py/session.py), /capture/start·stop 라우터
-- **다음 작업**: pip install → docker-compose up (DB) → alembic upgrade head → uvicorn 실행 → /capture/start 동작 확인
-- **블로커**: STT 모델 미확정(벤치마크 필요), /capture/start의 job_id DB 발급 미구현(임시 하드코딩)
+- **현재 Phase**: Phase 1 MVP 완성 (2026-05-11)
+- **마지막 완료 작업**:
+  - **STT 확정**: `faster-whisper==1.1.4` (ADR-001), `faster_whisper_impl.py` 실구현, `whisperx_impl.py` 삭제
+  - **LLM 확정**: `Qwen2.5-7B-Instruct` via Ollama (ADR-002), `quiz_generator.py` 실구현
+  - **`config.py`**: STT/LLM 설정값 추가 (`stt_*`, `llm_*`)
+  - **API 라우터**: `status.py` (`GET /status/{job_id}`), `quiz.py` (`GET /quiz/{quiz_id}`, `GET /quiz/job/{job_id}`)
+  - **파이프라인 연결**:
+    - `job_runner.py`: STT → 노이즈 제거 → 퀴즈 생성 → DB 저장, Job 상태 `pending→processing→done/failed`. blocking 작업 `asyncio.to_thread` 처리. DB 세션 3분리
+    - `session.py`: `stt`/`loop` 필드 추가, `on_wav_ready`에서 `asyncio.run_coroutine_threadsafe`로 메인 루프에 파이프라인 스케줄
+    - `capture.py`: `Request`로 `app.state.stt`/`app.state.loop` 주입, STT 미설치 시 503
+    - `main.py`: 앱 시작 시 STT 모델 로드(`asyncio.to_thread`), `app.state.loop` 저장
+  - **웹 UI** (HTMX + Tailwind CSS):
+    - `routers/pages.py`: `GET /`, `GET /jobs/{job_id}`, `GET /fragments/status/{job_id}`
+    - `templates/index.html`: 캡처 시작/중지
+    - `templates/job.html`: HTMX 폴링 컨테이너
+    - `templates/fragments/status.html`: pending/processing(3초 폴링) → done(퀴즈 렌더링+채점) / failed(에러) 자동 전환
+  - `requirements.txt`: `pyaudiowpatch 0.2.12.8`, `asyncpg 0.31.0`, `faster-whisper==1.1.4`, `openai==1.56.0` 확정
+  - `.env` 생성, 기본 패키지 `py -m pip install` 완료
+
+- **다음 작업**:
+  1. Docker Desktop 설치 (`winget install Docker.DockerDesktop`)
+  2. `docker compose up -d`
+  3. `py -m alembic upgrade head`
+  4. `py -m pip install faster-whisper==1.1.4 openai==1.56.0`
+  5. Ollama 설치 → `ollama pull qwen2.5:7b-instruct`
+  6. `py -m uvicorn app.main:app --reload`
+  7. 브라우저 `http://localhost:8000` → 캡처 → 퀴즈 엔드투엔드 확인
+
+- **블로커**: Docker Desktop 미설치
 
 ---
 
 ## 알려진 미결 사항
 
-- PostgreSQL 로컬 세팅 방법 학습 필요 (Docker Compose로 먼저 띄우는 방식 사용 예정)
-- 임베딩 기반 노이즈 제거 전략 구체화 필요 (top-k cosine similarity 기반 필터링 예정)
-- 클라우드 제공사 미확정
-- WASAPI loopback 캡처 중 STT 파이프라인 트리거 시점 확정 필요 (청크 크기 / 무음 감지 기반)
+- `preprocessor.py` 노이즈 제거 미구현 (현재 pass-through) — 임베딩 모델 미확정 (Phase 2)
+- 웹 UI React 전환 예정 (Phase 2, 현재 HTMX+Tailwind로 운영)
+- 클라우드 제공사 미확정 (Phase 3)

@@ -1,0 +1,158 @@
+{% if job is none %}
+{# ── Job 없음 ──────────────────────────────────────────────────────────── #}
+<div id="status-container" class="text-center py-16 text-red-400">
+  Job을 찾을 수 없습니다.
+</div>
+
+{% elif job.status == 'pending' or job.status == 'processing' %}
+{# ── 처리 중 — 3초마다 폴링 ───────────────────────────────────────────── #}
+<div id="status-container"
+     hx-get="/fragments/status/{{ job.id }}"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML"
+     class="bg-white rounded-2xl shadow-sm p-10 text-center">
+  <svg class="animate-spin h-10 w-10 mx-auto text-indigo-400 mb-5" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+  </svg>
+  {% if job.status == 'pending' %}
+  <span class="inline-block px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-sm font-medium mb-3">대기 중</span>
+  <p class="text-slate-400 text-sm">캡처 완료 후 파이프라인이 시작됩니다...</p>
+  {% else %}
+  <span class="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-600 text-sm font-medium mb-3">처리 중</span>
+  <p class="text-slate-400 text-sm">강의를 전사하고 퀴즈를 생성하고 있습니다...</p>
+  {% endif %}
+</div>
+
+{% elif job.status == 'failed' %}
+{# ── 실패 — 폴링 없음 ────────────────────────────────────────────────── #}
+<div id="status-container" class="bg-red-50 border border-red-200 rounded-2xl p-8">
+  <span class="inline-block px-3 py-1 rounded-full bg-red-100 text-red-600 text-sm font-medium mb-4">실패</span>
+  <p class="text-red-700 font-medium mb-2">파이프라인 처리 중 오류가 발생했습니다.</p>
+  {% if job.error_message %}
+  <p class="text-red-400 text-sm font-mono bg-red-100 rounded-lg px-4 py-3 mt-3">{{ job.error_message }}</p>
+  {% endif %}
+</div>
+
+{% elif job.status == 'done' and quiz %}
+{# ── 완료 + 퀴즈 표시 — 폴링 없음 ──────────────────────────────────── #}
+<div id="status-container">
+
+  <div class="flex items-center justify-between mb-6">
+    <span class="px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-medium">완료</span>
+    <span class="text-sm text-slate-400">{{ quiz.quizzes | length }}개 문제</span>
+  </div>
+
+  <form id="quiz-form" onsubmit="checkAnswers(event)" class="space-y-5">
+    {% for q in quiz.quizzes %}
+    {% set qi = loop.index0 %}
+    <div class="question-card bg-white rounded-2xl shadow-sm p-6 border-l-4 border-slate-200 transition-all duration-200"
+         data-answer="{{ q.answer }}"
+         data-index="{{ qi }}">
+
+      <!-- 번호 + 질문 -->
+      <div class="flex items-start gap-3 mb-4">
+        <span class="shrink-0 w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-bold">
+          {{ loop.index }}
+        </span>
+        <p class="text-slate-800 font-medium leading-relaxed">{{ q.question }}</p>
+      </div>
+
+      <!-- 난이도 뱃지 -->
+      <div class="mb-4">
+        {% if q.difficulty == 'easy' %}
+        <span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">쉬움</span>
+        {% elif q.difficulty == 'medium' %}
+        <span class="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">보통</span>
+        {% else %}
+        <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">어려움</span>
+        {% endif %}
+      </div>
+
+      <!-- 선택지 -->
+      <div class="space-y-2">
+        {% for choice in q.choices %}
+        <label class="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer border border-slate-100 hover:bg-slate-50 transition-colors">
+          <input type="radio" name="q{{ qi }}" value="{{ choice[0] }}"
+                 class="accent-indigo-600 w-4 h-4 shrink-0">
+          <span class="text-slate-700 text-sm">{{ choice }}</span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <!-- 해설 (제출 후 표시) -->
+      <div class="explanation hidden mt-4 px-4 py-3 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-900">
+        <strong class="block mb-1 text-indigo-700">해설</strong>
+        {{ q.explanation }}
+      </div>
+    </div>
+    {% endfor %}
+
+    <!-- 제출 버튼 -->
+    <div class="flex justify-center pt-2">
+      <button type="submit"
+              class="px-10 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow-md hover:bg-indigo-700 active:scale-95 transition-all">
+        답안 제출
+      </button>
+    </div>
+  </form>
+
+  <!-- 점수 (제출 후 표시) -->
+  <div id="result" class="hidden mt-8 text-center bg-white rounded-2xl shadow-sm p-10">
+    <p class="text-slate-400 text-sm mb-2">점수</p>
+    <p class="text-6xl font-bold text-indigo-600 mb-1">
+      <span id="score-num">0</span>
+      <span class="text-2xl text-slate-300">/ {{ quiz.quizzes | length }}</span>
+    </p>
+    <p id="score-msg" class="text-slate-500 mt-4 text-base"></p>
+  </div>
+</div>
+
+<script>
+function checkAnswers(e) {
+  e.preventDefault();
+  const cards = document.querySelectorAll('.question-card');
+  let correct = 0;
+
+  cards.forEach((card, i) => {
+    const selected = document.querySelector(`input[name="q${i}"]:checked`);
+    const answer = card.dataset.answer;
+
+    card.querySelector('.explanation').classList.remove('hidden');
+    card.classList.remove('border-slate-200');
+
+    if (selected && selected.value === answer) {
+      correct++;
+      card.classList.add('border-green-400', 'bg-green-50');
+    } else {
+      card.classList.add('border-red-400', 'bg-red-50');
+    }
+  });
+
+  const total = cards.length;
+  document.getElementById('score-num').textContent = correct;
+  document.getElementById('result').classList.remove('hidden');
+
+  const pct = correct / total;
+  const msg = pct === 1 ? '완벽합니다!' : pct >= 0.8 ? '잘 하셨습니다!' : pct >= 0.6 ? '조금 더 복습이 필요합니다.' : '강의 내용을 다시 확인해보세요.';
+  document.getElementById('score-msg').textContent = msg;
+
+  e.target.querySelector('button[type=submit]').disabled = true;
+  document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+
+{% else %}
+{# ── done이지만 quiz 아직 없음 — 잠시 더 폴링 ──────────────────────── #}
+<div id="status-container"
+     hx-get="/fragments/status/{{ job.id }}"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML"
+     class="bg-white rounded-2xl shadow-sm p-10 text-center">
+  <svg class="animate-spin h-10 w-10 mx-auto text-indigo-400 mb-5" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+  </svg>
+  <span class="inline-block px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-medium mb-3">완료 — 퀴즈 로딩 중</span>
+</div>
+{% endif %}

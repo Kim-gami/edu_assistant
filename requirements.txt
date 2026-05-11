@@ -6,18 +6,19 @@ jinja2==3.1.4
 
 # ── DB ───────────────────────────────────────────────────────────────────────
 sqlalchemy==2.0.35
-asyncpg==0.29.0              # PostgreSQL 비동기 드라이버
+asyncpg==0.31.0              # PostgreSQL 비동기 드라이버
 alembic==1.13.3
 
 # ── Config ───────────────────────────────────────────────────────────────────
 pydantic-settings==2.5.2
 
 # ── 오디오 캡처 (Windows 전용) ───────────────────────────────────────────────
-pyaudiowpatch==0.2.12.6      # Windows WASAPI loopback 캡처 (pyaudio 포크)
+pyaudiowpatch==0.2.12.8      # Windows WASAPI loopback 캡처 (pyaudio 포크)
 
 # ── STT (Phase 1 — 벤치마크 후 하나로 확정 예정) ────────────────────────────
-# faster-whisper==1.0.3
-# whisperx==3.1.5
+faster-whisper==1.1.4        # STT 확정 (2026-05-11)
+openai==1.56.0               # LLM 클라이언트 — Ollama OpenAI-compatible 엔드포인트 사용
+# whisperx==3.1.5            # 미사용 — faster-whisper로 확정
 
 # ── Dev ──────────────────────────────────────────────────────────────────────
 pytest==8.3.3
