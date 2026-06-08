@@ -176,9 +176,9 @@ class STTBase(ABC):
 ### Phase 2 — 품질 개선
 - [ ] 문제 형식 선택 (4지선다 / 참거짓 / 단답형)
 - [ ] 난이도 선택 (쉬움 / 보통 / 어려움)
-- [ ] 오답 품질 개선 — 개념적으로 유사하지만 틀린 선택지 생성
+- [x] 오답 품질 개선 — 개념적으로 유사하지만 틀린 선택지 생성 (프롬프트 튜닝)
 - [ ] `preprocessor.py` 임베딩 기반 노이즈 제거 실구현
-- [ ] 문제가 강의의 핵심 개념을 묻도록 프롬프트 튜닝
+- [x] 문제가 강의의 핵심 개념을 묻도록 프롬프트 튜닝
 - [ ] 퀴즈 결과 공유 URL 생성
 - [ ] 웹 UI React 전환 검토
 
@@ -204,28 +204,34 @@ class STTBase(ABC):
 
 > 이 섹션은 세션마다 업데이트한다.
 
-- **현재 Phase**: Phase 1 완료, Phase 2 준비 중 (2026-05-11)
-- **마지막 완료 작업**:
-  - **오디오 캡처 전환**: WASAPI(Windows 전용) → 브라우저 getDisplayMedia + WebSocket
-    - `app/routers/ws_audio.py` 신규 구현
-    - `app/templates/index.html` 브라우저 캡처 UI로 교체
-    - pyaudiowpatch 의존성 제거
-  - **풀 컨테이너화**:
-    - `Dockerfile`: python:3.13-slim, ffmpeg/libgomp1 설치, entrypoint.sh 실행
-    - `entrypoint.sh`: alembic upgrade head → uvicorn 자동 실행
-    - `docker-compose.yml`: app + db + ollama 3서비스 구성
-    - HuggingFace 캐시(`~/.cache/huggingface`) 볼륨 마운트 (재다운로드 방지)
-    - Ollama 모델(`~/.ollama`) 볼륨 마운트 (재다운로드 방지)
-  - **기타 수정**:
-    - `requirements.txt`: greenlet 추가, pyaudiowpatch 제거, faster-whisper 1.1.1
-    - `alembic.ini`: 한글 주석 제거 (Windows cp949 인코딩 충돌 수정)
-    - `alembic/versions/0001_initial.py`: op.execute(sa.text(...)) 방식으로 재작성
-  - **E2E 파이프라인 동작 확인**: 브라우저 캡처 → STT → 퀴즈 생성 → 웹 UI 렌더링
+- **현재 Phase**: Phase 2 진행 중 (2026-05-15)
+- **마지막 완료 작업** (2026-05-15):
+  - **버그 수정 — faster-whisper 임포트 실패**:
+    - `huggingface-hub` 1.14가 내부 HTTP 클라이언트를 `requests` → `httpx`로 교체하면서
+      `faster_whisper/utils.py`의 `import requests`가 실패 (STT 비활성화, code 1011)
+    - `requirements.txt`에 `requests>=2.32.0` 추가
+  - **버그 수정 — 퀴즈 파이프라인 구조 오류**:
+    - 기존: 30초 청크마다 STT + LLM 퀴즈 생성 → 15분 영상 = 30번 동시 LLM 호출로 타임아웃
+    - 수정: 청크별 STT만 실행해 세그먼트 누적, WebSocket 종료 후 전체 텍스트로 퀴즈 1회 생성
+    - 관련 파일: `app/routers/ws_audio.py`, `app/services/job_runner.py`
+      - `run_pipeline` → `run_pipeline_chunk` + `finalize_job` 분리
+  - **버그 수정 — 퀴즈 1개만 생성**:
+    - Ollama 기본 컨텍스트(4096 토큰)에서 입력 토큰이 ~2000개를 차지해 출력 공간 부족
+    - `extra_body={"options": {"num_ctx": 8192}}`로 컨텍스트 확장
+  - **버그 수정 — 레이스 컨디션**:
+    - `finalize_job`이 마지막 청크 STT 완료 전 실행되어 세그먼트 누락
+    - `chunk_futures`를 `asyncio.gather`로 전부 기다린 후 finalize 실행
+  - **퀴즈 품질 개선 — 프롬프트 튜닝** (`app/services/quiz_generator.py`):
+    - 섹션 분리: 글자 수 기준 → 문장 경계(`.!?`) 기준으로 변경
+    - 오답 품질: 강의 몰라도 바로 알 수 있는 오답 금지 규칙 추가
+    - 해설: A·B·C·D 각각 왜 틀렸는지 구체적 설명 요구, 단순 부정 표현 금지
 
 - **다음 작업**:
-  1. Docker 컨테이너 전체 스택 기동 테스트 (`docker compose up`)
-  2. Phase 2 기능 개발 시작
-     - 우선순위: `preprocessor.py` 노이즈 제거 실구현 (임베딩 모델 선정 필요)
+  1. AWS EC2 배포 (문제 품질 확인 후 진행 예정)
+     - ECR push → EC2 `docker compose up`
+     - 인스턴스: m6i.2xlarge(CPU) 또는 g4dn.xlarge(GPU) 결정 필요
+  2. Phase 2 잔여 기능
+     - `preprocessor.py` 임베딩 기반 노이즈 제거 실구현
      - 문제 형식 / 난이도 파라미터 UI 노출
 
 - **블로커**: 없음

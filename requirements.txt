@@ -19,6 +19,7 @@ pydantic-settings==2.5.2
 
 # ── STT (Phase 1 — 벤치마크 후 하나로 확정 예정) ────────────────────────────
 faster-whisper==1.1.1        # STT 확정 (2026-05-11, 1.1.4 미존재→1.1.1)
+requests>=2.32.0             # faster-whisper 내부 의존성 (huggingface-hub 1.x가 httpx로 전환해 누락됨)
 openai==1.56.0               # LLM 클라이언트 — Ollama OpenAI-compatible 엔드포인트 사용
 # whisperx==3.1.5            # 미사용 — faster-whisper로 확정
 
